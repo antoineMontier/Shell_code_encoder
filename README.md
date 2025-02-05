@@ -1,2 +1,10 @@
 # Shell_code_encoder
-# Shell_code_encoder
+
+
+0x2b280970
+0x41414141
+0x6a694831
+
+0x41414141
+0x2b7a1909
+0x6a3b5848

